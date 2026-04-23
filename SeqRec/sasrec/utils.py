@@ -186,7 +186,7 @@ class SeqDataset_Validation(Dataset):
         return user_id, seq, pos, neg
     
 # train/val/test data generation
-def data_partition(fname, args, path=None, data_dir=None):
+def data_partition(fname, args, path=None, data_dir=None, test_dir=None):
     usernum = 0
     itemnum = 0
     User = defaultdict(list)
@@ -197,7 +197,8 @@ def data_partition(fname, args, path=None, data_dir=None):
 
     for t in ['train','valid','test']:
         if data_dir is not None:
-            f = open(os.path.join(data_dir, f'{fname}_{t}.txt'), 'r')
+            dir_ = test_dir if (t == 'test' and test_dir is not None) else data_dir
+            f = open(os.path.join(dir_, f'{fname}_{t}.txt'), 'r')
         elif path is not None:
             f = open(path+f'_{t}.txt','r')
         else:

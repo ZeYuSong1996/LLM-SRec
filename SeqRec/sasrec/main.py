@@ -24,7 +24,8 @@ parser.add_argument('--dropout_rate', default=0.1, type=float)
 parser.add_argument('--l2_emb', default=0.0, type=float)
 parser.add_argument('--device', default='0', type=str, help='cpu, hpu, gpu -> num')
 parser.add_argument('--hf_local_dir', default=None, type=str, help='local directory for huggingface dataset download')
-parser.add_argument('--data_dir', default=None, type=str, help='directory to save/load processed dataset files, defaults to ./../data_{dataset}')
+parser.add_argument('--data_dir', default=None, type=str, help='directory to save/load train/valid processed files, defaults to ./../data_{dataset}')
+parser.add_argument('--test_dir', default=None, type=str, help='directory to save/load test processed files, defaults to data_dir')
 
 parser.add_argument('--inference_only', default=False, action='store_true')
 parser.add_argument('--nn_parameter', default=False, action='store_true')
@@ -41,12 +42,14 @@ if __name__ == '__main__':
         args.is_hpu = False
         
     data_dir = args.data_dir if args.data_dir else f'./../data_{args.dataset}'
-    if (not os.path.isfile(os.path.join(data_dir, f'{args.dataset}_train.txt'))) or (not os.path.isfile(os.path.join(data_dir, f'{args.dataset}_valid.txt'))) or (not os.path.isfile(os.path.join(data_dir, f'{args.dataset}_test.txt'))):
+    test_dir = args.test_dir if args.test_dir else data_dir
+    if (not os.path.isfile(os.path.join(data_dir, f'{args.dataset}_train.txt'))) or (not os.path.isfile(os.path.join(data_dir, f'{args.dataset}_valid.txt'))) or (not os.path.isfile(os.path.join(test_dir, f'{args.dataset}_test.txt'))):
         print("Download Dataset")
-        if not os.path.exists(data_dir):
-            os.makedirs(data_dir)
-        preprocess_raw_5core(args.dataset, local_dir=args.hf_local_dir, data_dir=data_dir)
-    dataset = data_partition(args.dataset, args, data_dir=data_dir)
+        for d in set([data_dir, test_dir]):
+            if not os.path.exists(d):
+                os.makedirs(d)
+        preprocess_raw_5core(args.dataset, local_dir=args.hf_local_dir, data_dir=data_dir, test_dir=test_dir)
+    dataset = data_partition(args.dataset, args, data_dir=data_dir, test_dir=test_dir)
     
     
     [user_train, user_valid, user_test, usernum, itemnum, eval_set] = dataset

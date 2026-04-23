@@ -11,13 +11,15 @@ import pandas as pd
 from huggingface_hub import hf_hub_download
 
     
-def preprocess_raw_5core(fname, local_dir=None, data_dir=None):
+def preprocess_raw_5core(fname, local_dir=None, data_dir=None, test_dir=None):
     
     random.seed(0)
     np.random.seed(0)
 
     if data_dir is None:
         data_dir = f'./../data_{fname}'
+    if test_dir is None:
+        test_dir = data_dir
 
     repo_id = "McAuley-Lab/Amazon-Reviews-2023"
     dl_kwargs = dict(repo_id=repo_id, repo_type="dataset", local_dir=local_dir)
@@ -121,7 +123,7 @@ def preprocess_raw_5core(fname, local_dir=None, data_dir=None):
     for t in ['train', 'valid', 'test']:
         d = dataset[t]
         use_id = defaultdict(int)
-        f = open(os.path.join(data_dir, f'{fname}_{t}.txt'), 'w')
+        f = open(os.path.join(test_dir if t == 'test' else data_dir, f'{fname}_{t}.txt'), 'w')
         for l in tqdm(d):
             
             user_id = l['user_id']
