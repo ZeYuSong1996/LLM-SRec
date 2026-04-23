@@ -7,22 +7,45 @@ from tqdm import tqdm
 from collections import defaultdict
 import random
 import pickle
-from datasets import load_dataset
+import pandas as pd
+from huggingface_hub import hf_hub_download
 
     
-def preprocess_raw_5core(fname):
+def preprocess_raw_5core(fname, local_dir=None, data_dir=None):
     
     random.seed(0)
     np.random.seed(0)
-    
-    dataset = load_dataset("McAuley-Lab/Amazon-Reviews-2023", f"5core_last_out_{fname}", trust_remote_code=True)
-    meta_dataset = load_dataset("McAuley-Lab/Amazon-Reviews-2023", f"raw_meta_{fname}", trust_remote_code=True)
+
+    if data_dir is None:
+        data_dir = f'./../data_{fname}'
+
+    repo_id = "McAuley-Lab/Amazon-Reviews-2023"
+    dl_kwargs = dict(repo_id=repo_id, repo_type="dataset", local_dir=local_dir)
+
+    print("Downloading 5core_last_out data...")
+    dataset = {}
+    for split in ['train', 'valid', 'test']:
+        path = hf_hub_download(
+            filename=f"benchmark/5core/last_out/{fname}.{split}.csv",
+            **dl_kwargs
+        )
+        dataset[split] = pd.read_csv(path).to_dict(orient='records')
+
+    print("Downloading raw_meta data...")
+    meta_path = hf_hub_download(
+        filename=f"raw/meta_categories/meta_{fname}.jsonl",
+        **dl_kwargs
+    )
+    meta_dataset_records = []
+    with open(meta_path, 'r') as f:
+        for line in f:
+            meta_dataset_records.append(json.loads(line.strip()))
     
     print("Load Meta Data")
     meta_dict = {}
-    for l in tqdm(meta_dataset['full']):
+    for l in tqdm(meta_dataset_records):
         meta_dict[l['parent_asin']] = [l['title'], l['description']]
-    del meta_dataset
+    del meta_dataset_records
     
     usermap = dict()
     usernum = 0
@@ -98,7 +121,7 @@ def preprocess_raw_5core(fname):
     for t in ['train', 'valid', 'test']:
         d = dataset[t]
         use_id = defaultdict(int)
-        f = open(f'./../data_{fname}/{fname}_{t}.txt', 'w')
+        f = open(os.path.join(data_dir, f'{fname}_{t}.txt'), 'w')
         for l in tqdm(d):
             
             user_id = l['user_id']
@@ -190,7 +213,7 @@ def preprocess_raw_5core(fname):
                             
                                 f.write('%d %d\n' % (userid, itemid))
         f.close()
-        with open(f'./../data_{fname}/text_name_dict.json.gz', 'wb') as tf:
+        with open(os.path.join(data_dir, 'text_name_dict.json.gz'), 'wb') as tf:
             pickle.dump(text_dict, tf)
     
     del text_dict

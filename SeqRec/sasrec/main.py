@@ -23,6 +23,8 @@ parser.add_argument('--num_heads', default=1, type=int)
 parser.add_argument('--dropout_rate', default=0.1, type=float)
 parser.add_argument('--l2_emb', default=0.0, type=float)
 parser.add_argument('--device', default='0', type=str, help='cpu, hpu, gpu -> num')
+parser.add_argument('--hf_local_dir', default=None, type=str, help='local directory for huggingface dataset download')
+parser.add_argument('--data_dir', default=None, type=str, help='directory to save/load processed dataset files, defaults to ./../data_{dataset}')
 
 parser.add_argument('--inference_only', default=False, action='store_true')
 parser.add_argument('--nn_parameter', default=False, action='store_true')
@@ -38,12 +40,13 @@ if __name__ == '__main__':
     else:
         args.is_hpu = False
         
-    if (not os.path.isfile(f'./../data_{args.dataset}/{args.dataset}_train.txt')) or (not os.path.isfile(f'./../data_{args.dataset}/{args.dataset}_valid.txt') or (not os.path.isfile(f'./../data_{args.dataset}/{args.dataset}_test.txt'))):
+    data_dir = args.data_dir if args.data_dir else f'./../data_{args.dataset}'
+    if (not os.path.isfile(os.path.join(data_dir, f'{args.dataset}_train.txt'))) or (not os.path.isfile(os.path.join(data_dir, f'{args.dataset}_valid.txt'))) or (not os.path.isfile(os.path.join(data_dir, f'{args.dataset}_test.txt'))):
         print("Download Dataset")
-        if not os.path.exists(f'./../data_{args.dataset}'):
-            os.makedirs(f'./../data_{args.dataset}')
-        preprocess_raw_5core(args.dataset)
-    dataset = data_partition(args.dataset, args)
+        if not os.path.exists(data_dir):
+            os.makedirs(data_dir)
+        preprocess_raw_5core(args.dataset, local_dir=args.hf_local_dir, data_dir=data_dir)
+    dataset = data_partition(args.dataset, args, data_dir=data_dir)
     
     
     [user_train, user_valid, user_test, usernum, itemnum, eval_set] = dataset
