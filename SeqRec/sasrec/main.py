@@ -165,8 +165,8 @@ if __name__ == '__main__':
     
         if epoch == args.num_epochs:
             folder = args.dataset
-            fname = 'SASRec_saving.epoch={}.lr={}.layer={}.head={}.hidden={}.maxlen={}.pth'
-            fname = fname.format(args.num_epochs, args.lr, args.num_blocks, args.num_heads, args.hidden_units, args.maxlen)
+            fname = 'SASRec_saving.epoch={}.lr={}.layer={}.head={}.hidden={}.maxlen={}.dropout={}.pth'
+            fname = fname.format(args.num_epochs, args.lr, args.num_blocks, args.num_heads, args.hidden_units, args.maxlen, args.dropout_rate)
             if not os.path.exists(os.path.join(folder, fname)):
                 try:
                     os.makedirs(os.path.join(folder))
