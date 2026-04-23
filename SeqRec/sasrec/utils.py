@@ -350,8 +350,16 @@ def save_eval(model, dataset, args):
         print('\n')
         print('test (NDCG@10: %.4f, HR@10: %.4f)' % (t_test[0], t_test[1]))
     
-    with open(f'./../data_{args.dataset}/Results.txt', 'w') as f:
-        sys.stdout = f
-        print('test (NDCG@10: %.4f, HR@10: %.4f)' % (t_test[0], t_test[1]))
-        sys.stdout = sys.__stdout__ 
+    # 与 data_partition 保持一致，优先使用 args.data_dir，否则使用默认路径
+    if hasattr(args, 'data_dir') and args.data_dir is not None:
+        result_dir = args.data_dir
+    else:
+        result_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', f'data_{args.dataset}')
+    
+    # 确保目录存在
+    os.makedirs(result_dir, exist_ok=True)
+    
+    result_path = os.path.join(result_dir, 'Results.txt')
+    with open(result_path, 'w') as f:
+        f.write('test (NDCG@10: %.4f, HR@10: %.4f)\n' % (t_test[0], t_test[1]))
         
