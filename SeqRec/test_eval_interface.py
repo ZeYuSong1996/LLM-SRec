@@ -56,9 +56,14 @@ from utils import evaluate, data_partition        # noqa: E402
 # ------------------------------------------------------------------ #
 
 def load_model(state_dict_path: str, device: str) -> SASRec:
+    # Normalize device string (main.py stores '0' for GPU 0)
+    if device not in ('cpu', 'hpu') and not device.startswith('cuda'):
+        device = f'cuda:{device}'
+
     # Custom map_location to handle HPU-saved checkpoints (storage tag 0)
     def map_location(storage, loc):
         return storage
+
     kwargs, state_dict = torch.load(state_dict_path, map_location=map_location, weights_only=False)
     kwargs['args'].device = device
     model = SASRec(**kwargs).to(device)
