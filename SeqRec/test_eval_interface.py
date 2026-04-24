@@ -40,7 +40,8 @@ import torch
 # ------------------------------------------------------------------ #
 SCRIPT_DIR  = os.path.dirname(os.path.abspath(__file__))          # LLM-SRec/SeqRec
 SASREC_DIR  = os.path.join(SCRIPT_DIR, 'sasrec')
-AGENT_DIR   = os.path.abspath(os.path.join(SCRIPT_DIR, '../../MLE_AGENT/Amazon_Reviews_Task'))
+# AGENT_DIR   = os.path.abspath(os.path.join(SCRIPT_DIR, '../../MLE_AGENT/Amazon_Reviews_Task'))
+AGENT_DIR = '/mmu_vcg2_wjc_ssd/songzeyu/MLE_AGENT/Amazon_Reviews_Task'
 
 for p in [SASREC_DIR, SCRIPT_DIR]:
     if p not in sys.path:

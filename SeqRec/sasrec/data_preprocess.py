@@ -215,7 +215,7 @@ def preprocess_raw_5core(fname, local_dir=None, data_dir=None, test_dir=None):
                             
                                 f.write('%d %d\n' % (userid, itemid))
         f.close()
-        with open(os.path.join(data_dir, 'text_name_dict.json.gz'), 'wb') as tf:
+        with open(os.path.join(data_dir, f'{fname}_text_name_dict.json.gz'), 'wb') as tf:
             pickle.dump(text_dict, tf)
     
     del text_dict
