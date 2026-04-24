@@ -56,7 +56,10 @@ from utils import evaluate, data_partition        # noqa: E402
 # ------------------------------------------------------------------ #
 
 def load_model(state_dict_path: str, device: str) -> SASRec:
-    kwargs, state_dict = torch.load(state_dict_path, map_location=device, weights_only=False)
+    # Custom map_location to handle HPU-saved checkpoints (storage tag 0)
+    def map_location(storage, loc):
+        return storage
+    kwargs, state_dict = torch.load(state_dict_path, map_location=map_location, weights_only=False)
     kwargs['args'].device = device
     model = SASRec(**kwargs).to(device)
     model.load_state_dict(state_dict)
