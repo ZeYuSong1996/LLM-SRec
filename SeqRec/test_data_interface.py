@@ -80,6 +80,7 @@ from model import SASRec                                        # noqa: E402  (f
 from utils import evaluate, data_partition                      # noqa: E402  (from sasrec/)
 from utils import WarpSampler as OrigWarpSampler                # noqa: E402  (from sasrec/)
 from data_interface import WarpSampler as DIWarpSampler         # noqa: E402  (from AGENT_DIR)
+from data_interface import load_dataset as di_load_dataset      # noqa: E402  (from AGENT_DIR)
 
 
 # ------------------------------------------------------------------ #
@@ -212,7 +213,8 @@ def _train_loop(
 
 
 def train_sasrec_di(
-    user_train: dict,
+    dataset_name: str,
+    data_dir: str,
     usernum: int,
     itemnum: int,
     args_ns: types.SimpleNamespace,
@@ -222,7 +224,20 @@ def train_sasrec_di(
     seed: int,
     save_path: str | None,
 ) -> SASRec:
-    """Train SASRec using data_interface.WarpSampler (MLE_AGENT)."""
+    """Train SASRec using data_interface.load_dataset + WarpSampler (MLE_AGENT)."""
+    # Load dataset via data_interface (not data_partition)
+    train_data, _ = di_load_dataset(
+        dataset_name = dataset_name,
+        data_dir     = data_dir,
+        num_neg      = 1,
+        seed         = seed,
+    )
+    # Reconstruct user_train dict required by WarpSampler and _train_loop
+    user_train: dict = {}
+    for sample in train_data:
+        uid = sample['user_id']
+        user_train[uid] = sample['history'] + [sample['target']]
+
     sampler = DIWarpSampler(
         user_train, usernum, itemnum,
         batch_size = batch_size,
