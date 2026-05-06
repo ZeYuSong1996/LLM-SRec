@@ -1,0 +1,15 @@
+python test_data_interface.py \
+--dataset Movies_and_TV \
+--data_dir /mmu_vcg2_wjc_ssd/songzeyu/Amazon-Reviews-2023-trainval \
+--test_dir /mmu_vcg2_wjc_ssd/songzeyu/Amazon-Reviews-2023-test \
+--num_epochs 200 \
+--batch_size 128 \
+--lr 0.001 \
+--maxlen 128 \
+--hidden_units 64 \
+--num_blocks 2 \
+--num_heads 1 \
+--dropout_rate 0.5 \
+--l2_emb 0.0 \
+--device 0 \
+--seed 42 
