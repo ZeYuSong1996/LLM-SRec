@@ -5,3 +5,27 @@ python test_eval_interface.py \
 --test_dir /mmu_vcg2_wjc_ssd/songzeyu/Amazon-Reviews-2023-test \
 --device 0 \
 --maxlen 128
+
+python test_eval_interface.py \
+--state_dict_path /mmu_vcg2_wjc_ssd/songzeyu/agent_workspace/LLM-SRec/SeqRec/sasrec/Industrial_and_Scientific/SASRec_saving.epoch=200.lr=0.001.layer=2.head=1.hidden=64.maxlen=128.dropout=0.5.pth \
+--dataset Industrial_and_Scientific \
+--data_dir /mmu_vcg2_wjc_ssd/songzeyu/Amazon-Reviews-2023-trainval \
+--test_dir /mmu_vcg2_wjc_ssd/songzeyu/Amazon-Reviews-2023-test \
+--device 0 \
+--maxlen 128
+
+python test_eval_interface.py \
+--state_dict_path /mmu_vcg2_wjc_ssd/songzeyu/agent_workspace/LLM-SRec/SeqRec/sasrec/Electronics/SASRec_saving.epoch=200.lr=0.001.layer=2.head=1.hidden=64.maxlen=128.dropout=0.5.pth \
+--dataset Electronics \
+--data_dir /mmu_vcg2_wjc_ssd/songzeyu/Amazon-Reviews-2023-trainval \
+--test_dir /mmu_vcg2_wjc_ssd/songzeyu/Amazon-Reviews-2023-test \
+--device 0 \
+--maxlen 128
+
+python test_eval_interface.py \
+--state_dict_path /mmu_vcg2_wjc_ssd/songzeyu/agent_workspace/LLM-SRec/SeqRec/sasrec/CDs_and_Vinyl/SASRec_saving.epoch=200.lr=0.001.layer=2.head=1.hidden=64.maxlen=128.dropout=0.5.pth \
+--dataset CDs_and_Vinyl \
+--data_dir /mmu_vcg2_wjc_ssd/songzeyu/Amazon-Reviews-2023-trainval \
+--test_dir /mmu_vcg2_wjc_ssd/songzeyu/Amazon-Reviews-2023-test \
+--device 0 \
+--maxlen 128
