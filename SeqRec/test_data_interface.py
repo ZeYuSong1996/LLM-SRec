@@ -2,23 +2,24 @@
 test_data_interface.py
 ======================
 
-Trains a SASRec model using ``data_interface.WarpSampler`` (from
-MLE_AGENT/Amazon_Reviews_Task) instead of the original
-``sasrec/utils.WarpSampler``, then validates
-``eval_interface.run_evaluation()`` against the canonical
-``sasrec/utils.evaluate()`` — exactly as ``test_eval_interface.py``
-does, but driven from the MLE_AGENT side.
+Trains two SASRec models from scratch:
+  1. Model A — using ``data_interface.WarpSampler`` (from MLE_AGENT)
+  2. Model B — using ``sasrec/utils.WarpSampler`` (original)
+
+Then evaluates both with ``sasrec/utils.evaluate()`` and prints a
+side-by-side comparison to verify the two samplers produce equivalent
+training signal.
 
 Purpose
 -------
-  1. Verify that ``data_interface.WarpSampler`` produces correct training
-     batches (model should converge normally).
-  2. Verify that ``eval_interface.run_evaluation()`` reports metrics
-     consistent with the reference ``evaluate()`` (|delta| ≤ 0.01).
+  Verify that ``data_interface.WarpSampler`` produces training batches
+  equivalent to the original ``sasrec/utils.WarpSampler``: both models
+  should reach similar HR / NDCG after the same number of epochs
+  (|delta| <= 0.01 is treated as a pass).
 
 Usage
 -----
-    # Full training + evaluation comparison:
+    # Train both models and compare:
     python test_data_interface.py \\
         --dataset    Industrial_and_Scientific \\
         --data_dir   /path/to/data_dir \\
@@ -29,30 +30,27 @@ Usage
         --maxlen     128 \\
         --seed       42
 
-    # Skip training, load an existing checkpoint:
+    # Load two existing checkpoints instead of training:
     python test_data_interface.py \\
-        --dataset          Industrial_and_Scientific \\
-        --data_dir         /path/to/data_dir \\
-        --test_dir         /path/to/test_dir \\
-        --state_dict_path  /path/to/SASRec_saving.epoch=200....pth \\
-        --device           cpu \\
-        --maxlen           128 \\
-        --seed             42
+        --dataset               Industrial_and_Scientific \\
+        --data_dir              /path/to/data_dir \\
+        --test_dir              /path/to/test_dir \\
+        --state_dict_path_di    /path/to/model_data_interface.pth \\
+        --state_dict_path_orig  /path/to/model_original.pth \\
+        --device                cpu \\
+        --maxlen                128 \\
+        --seed                  42
 
 Notes
 -----
-- When ``--state_dict_path`` is provided, training is skipped entirely and
-  the checkpoint is loaded directly for evaluation comparison.
+- Both models are initialised with the same random seed so that only
+  the sampler differs.
 - The SASRec model and utilities are imported from sasrec/ (same directory).
-- ``data_interface.WarpSampler`` is validated implicitly: if training
-  converges and evaluation metrics match, the sampler is producing correct
-  batches.
 """
 
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import os
 import random
 import sys
@@ -78,9 +76,10 @@ for p in [SASREC_DIR, SCRIPT_DIR]:
 if AGENT_DIR not in sys.path:
     sys.path.insert(0, AGENT_DIR)
 
-from model import SASRec                           # noqa: E402  (from sasrec/)
-from utils import evaluate, data_partition         # noqa: E402  (from sasrec/)
-from data_interface import WarpSampler             # noqa: E402  (from AGENT_DIR)
+from model import SASRec                                        # noqa: E402  (from sasrec/)
+from utils import evaluate, data_partition                      # noqa: E402  (from sasrec/)
+from utils import WarpSampler as OrigWarpSampler                # noqa: E402  (from sasrec/)
+from data_interface import WarpSampler as DIWarpSampler         # noqa: E402  (from AGENT_DIR)
 
 
 # ------------------------------------------------------------------ #
@@ -124,52 +123,42 @@ def load_checkpoint(state_dict_path: str, device: str) -> SASRec:
     return model
 
 
-def train_sasrec(
-    user_train: dict,
-    usernum: int,
-    itemnum: int,
-    args_ns: types.SimpleNamespace,
-    num_epochs: int,
-    batch_size: int,
-    lr: float,
-    save_path: str | None,
-) -> SASRec:
-    """
-    Train a SASRec model using ``data_interface.WarpSampler``.
-
-    The training loop mirrors ``sasrec/main.py`` exactly, but uses
-    ``data_interface.WarpSampler`` (from MLE_AGENT) as the batch sampler.
-    The key difference from the original WarpSampler is that
-    ``data_interface.WarpSampler`` supports ``num_neg`` negatives per
-    position (we pass ``num_neg=1`` here to match the original behaviour).
-    """
-    device    = args_ns.device
-    num_batch = len(user_train) // batch_size
-
-    # ------ Sampler from data_interface ------ #
-    sampler = WarpSampler(
-        user_train, usernum, itemnum,
-        batch_size = batch_size,
-        maxlen     = args_ns.maxlen,
-        num_neg    = 1,      # match original: one negative per position
-        n_workers  = 3,
-    )
-
-    # ------ Model ------ #
-    model = SASRec(usernum, itemnum, args_ns).to(device)
+def _make_model(usernum: int, itemnum: int, args_ns: types.SimpleNamespace,
+                seed: int) -> SASRec:
+    """Create and Xavier-initialise a fresh SASRec model with fixed seed."""
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    model = SASRec(usernum, itemnum, args_ns).to(args_ns.device)
     for _, param in model.named_parameters():
         try:
             torch.nn.init.xavier_normal_(param.data)
         except Exception:
             pass
+    return model
+
+
+def _train_loop(
+    sampler,
+    model: SASRec,
+    user_train: dict,
+    args_ns: types.SimpleNamespace,
+    num_epochs: int,
+    batch_size: int,
+    lr: float,
+    label: str,
+    save_path: str | None,
+) -> SASRec:
+    """Shared training loop; sampler must implement .next_batch() / .close()."""
+    device    = args_ns.device
+    num_batch = len(user_train) // batch_size
 
     bce_criterion  = torch.nn.BCEWithLogitsLoss()
     adam_optimizer = torch.optim.Adam(model.parameters(), lr=lr,
                                       betas=(0.9, 0.98))
 
-    print(f"\n[Training]  epochs={num_epochs}  batch_size={batch_size}"
+    print(f"\n[Training — {label}]  epochs={num_epochs}  batch_size={batch_size}"
           f"  num_batch={num_batch}  lr={lr}")
-    print("  (using data_interface.WarpSampler from MLE_AGENT)")
 
     start_time = time.time()
     for epoch in tqdm(range(1, num_epochs + 1)):
@@ -181,11 +170,11 @@ def train_sasrec(
             u   = np.array(u)
             seq = np.array(seq)
             pos = np.array(pos)
-            # neg from data_interface has shape (batch, maxlen, num_neg);
-            # squeeze last dim when num_neg==1 to match original (batch, maxlen)
             neg = np.array(neg)
+            # data_interface neg has shape (batch, maxlen, num_neg);
+            # squeeze last dim when num_neg==1 to match original (batch, maxlen)
             if neg.ndim == 3 and neg.shape[-1] == 1:
-                neg = neg[..., 0]   # (batch, maxlen)
+                neg = neg[..., 0]
 
             pos_logits, neg_logits = model(u, seq, pos, neg)
             pos_labels = torch.ones(pos_logits.shape,  device=device)
@@ -213,18 +202,68 @@ def train_sasrec(
     elapsed = time.time() - start_time
     print(f"\nTraining done in {elapsed:.1f}s")
 
-    # ------ Optionally save ------ #
     if save_path is not None:
         os.makedirs(os.path.dirname(os.path.abspath(save_path)), exist_ok=True)
         torch.save([model.kwargs, model.state_dict()], save_path)
-        print(f"Checkpoint saved → {save_path}")
+        print(f"Checkpoint saved -> {save_path}")
 
     model.eval()
     return model
 
 
+def train_sasrec_di(
+    user_train: dict,
+    usernum: int,
+    itemnum: int,
+    args_ns: types.SimpleNamespace,
+    num_epochs: int,
+    batch_size: int,
+    lr: float,
+    seed: int,
+    save_path: str | None,
+) -> SASRec:
+    """Train SASRec using data_interface.WarpSampler (MLE_AGENT)."""
+    sampler = DIWarpSampler(
+        user_train, usernum, itemnum,
+        batch_size = batch_size,
+        maxlen     = args_ns.maxlen,
+        num_neg    = 1,
+        n_workers  = 3,
+    )
+    model = _make_model(usernum, itemnum, args_ns, seed)
+    return _train_loop(sampler, model, user_train, args_ns,
+                       num_epochs, batch_size, lr,
+                       label='data_interface.WarpSampler (MLE_AGENT)',
+                       save_path=save_path)
+
+
+def train_sasrec_orig(
+    user_train: dict,
+    usernum: int,
+    itemnum: int,
+    args_ns: types.SimpleNamespace,
+    num_epochs: int,
+    batch_size: int,
+    lr: float,
+    seed: int,
+    save_path: str | None,
+) -> SASRec:
+    """Train SASRec using sasrec/utils.WarpSampler (original)."""
+    sampler = OrigWarpSampler(
+        user_train, usernum, itemnum,
+        batch_size = batch_size,
+        maxlen     = args_ns.maxlen,
+        n_workers  = 3,
+    )
+    model = _make_model(usernum, itemnum, args_ns, seed)
+    return _train_loop(sampler, model, user_train, args_ns,
+                       num_epochs, batch_size, lr,
+                       label='sasrec/utils.WarpSampler (original)',
+                       save_path=save_path)
+
+
 # ------------------------------------------------------------------ #
-# Evaluation helpers (mirrors test_eval_interface.py)                 #
+# Evaluation helpers                                                  #
 # ------------------------------------------------------------------ #
 
 def run_original_evaluate(model: SASRec, dataset, args_ns, seed: int) -> dict:
@@ -241,69 +280,6 @@ def run_original_evaluate(model: SASRec, dataset, args_ns, seed: int) -> dict:
     }
 
 
-def make_predict_fn(model: SASRec, maxlen: int):
-    """
-    Build a predict callable matching eval_interface's expected signature:
-        predict(user_id, history, candidates) -> List[float]
-    """
-    def predict(user_id: int, history: list, candidates: list) -> list:
-        seq = np.zeros([maxlen], dtype=np.int32)
-        idx = maxlen - 1
-        for item in reversed(history):
-            seq[idx] = item
-            idx -= 1
-            if idx == -1:
-                break
-
-        with torch.no_grad():
-            logits = model.predict(
-                np.array([user_id]),
-                np.array([seq]),
-                np.array(candidates),
-            )
-            scores = logits.squeeze().cpu().numpy()
-
-        if scores.ndim == 0:
-            scores = scores.reshape(1)
-        return scores.tolist()
-
-    return predict
-
-
-def run_eval_interface(
-    model: SASRec,
-    dataset_name: str,
-    data_dir: str,
-    test_dir: str,
-    maxlen: int,
-    seed: int,
-    max_eval_users: int,
-) -> dict:
-    """
-    Load eval_interface from AGENT_DIR and call run_evaluation() using
-    model.predict() directly — same approach as test_eval_interface.py.
-    """
-    predict_fn = make_predict_fn(model, maxlen)
-
-    ei_path = os.path.join(AGENT_DIR, 'eval_interface.py')
-    spec = importlib.util.spec_from_file_location('eval_interface', ei_path)
-    ei   = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(ei)
-
-    # Patch _load_predict_fn so it returns our closure
-    ei._load_predict_fn = lambda path: predict_fn
-
-    return ei.run_evaluation(
-        dataset_name   = dataset_name,
-        predict_script = 'model.predict',   # placeholder — not actually read
-        data_dir       = data_dir,
-        test_dir       = test_dir,
-        num_candidates = 99,
-        max_eval_users = max_eval_users,
-        seed           = seed,
-    )
-
-
 # ------------------------------------------------------------------ #
 # Main                                                                #
 # ------------------------------------------------------------------ #
@@ -311,36 +287,40 @@ def run_eval_interface(
 def main():
     parser = argparse.ArgumentParser(
         description=(
-            'Train SASRec with data_interface.WarpSampler, then compare '
-            'eval_interface.run_evaluation() against sasrec/utils.evaluate().'
+            'Train two SASRec models (data_interface vs original WarpSampler) '
+            'and compare their metrics with sasrec/utils.evaluate().'
         )
     )
     # --- data ---
-    parser.add_argument('--dataset',         required=True)
-    parser.add_argument('--data_dir',        default=None,
+    parser.add_argument('--dataset',  required=True)
+    parser.add_argument('--data_dir', default=None,
                         help='Dir with *_train.txt and *_valid.txt')
-    parser.add_argument('--test_dir',        default=None,
+    parser.add_argument('--test_dir', default=None,
                         help='Dir with *_test.txt (defaults to data_dir)')
 
     # --- model / training ---
-    parser.add_argument('--state_dict_path', default=None,
-                        help='Skip training and load this checkpoint instead')
-    parser.add_argument('--num_epochs',      default=5,    type=int)
-    parser.add_argument('--batch_size',      default=128,  type=int)
-    parser.add_argument('--lr',              default=0.001, type=float)
-    parser.add_argument('--maxlen',          default=128,  type=int)
-    parser.add_argument('--hidden_units',    default=64,   type=int)
-    parser.add_argument('--num_blocks',      default=2,    type=int)
-    parser.add_argument('--num_heads',       default=1,    type=int)
-    parser.add_argument('--dropout_rate',    default=0.1,  type=float)
-    parser.add_argument('--l2_emb',          default=0.0,  type=float)
-    parser.add_argument('--device',          default='cpu')
+    parser.add_argument('--state_dict_path_di',   default=None,
+                        help='Skip training model-A and load this checkpoint instead')
+    parser.add_argument('--state_dict_path_orig', default=None,
+                        help='Skip training model-B and load this checkpoint instead')
+    parser.add_argument('--num_epochs',   default=5,     type=int)
+    parser.add_argument('--batch_size',   default=128,   type=int)
+    parser.add_argument('--lr',           default=0.001, type=float)
+    parser.add_argument('--maxlen',       default=128,   type=int)
+    parser.add_argument('--hidden_units', default=64,    type=int)
+    parser.add_argument('--num_blocks',   default=2,     type=int)
+    parser.add_argument('--num_heads',    default=1,     type=int)
+    parser.add_argument('--dropout_rate', default=0.1,   type=float)
+    parser.add_argument('--l2_emb',       default=0.0,   type=float)
+    parser.add_argument('--device',       default='cpu')
 
     # --- evaluation ---
-    parser.add_argument('--seed',            default=42,   type=int)
-    parser.add_argument('--max_eval_users',  default=10000, type=int)
-    parser.add_argument('--save_path',       default=None,
-                        help='Where to save the trained checkpoint (optional)')
+    parser.add_argument('--seed',           default=42,    type=int)
+    parser.add_argument('--max_eval_users', default=10000, type=int)
+    parser.add_argument('--save_path_di',   default=None,
+                        help='Where to save model-A checkpoint (optional)')
+    parser.add_argument('--save_path_orig', default=None,
+                        help='Where to save model-B checkpoint (optional)')
 
     args = parser.parse_args()
 
@@ -353,31 +333,29 @@ def main():
     test_dir = args.test_dir or data_dir
     args_ns  = _build_args_ns(args, device)
 
-    # ---- Load dataset (needed for original evaluate()) ---------------- #
+    # ---- Load dataset ------------------------------------------------- #
     print("\nLoading dataset ...")
     dataset = data_partition(args.dataset, args_ns,
                              data_dir=data_dir, test_dir=test_dir)
     user_train, _, _, usernum, itemnum, _ = dataset
     print(f"usernum={usernum}  itemnum={itemnum}")
 
-    # ---- Train or load checkpoint ------------------------------------- #
-    if args.state_dict_path is not None:
-        print(f"\nLoading checkpoint: {args.state_dict_path}")
-        model = load_checkpoint(args.state_dict_path, device)
-        print("Checkpoint loaded. Skipping training.")
+    # ---- Model A: data_interface.WarpSampler -------------------------- #
+    print("\n" + "=" * 60)
+    print("Model A: data_interface.WarpSampler (MLE_AGENT)")
+    print("=" * 60)
+    if args.state_dict_path_di is not None:
+        print(f"Loading checkpoint: {args.state_dict_path_di}")
+        model_di = load_checkpoint(args.state_dict_path_di, device)
     else:
-        print(f"\nTraining SASRec for {args.num_epochs} epoch(s) ...")
-        print("  Batch sampler: data_interface.WarpSampler")
-        save_path = args.save_path
-        if save_path is None:
-            fname = (
-                f'SASRec_saving.epoch={args.num_epochs}.lr={args.lr}'
-                f'.layer={args.num_blocks}.head={args.num_heads}'
-                f'.hidden={args.hidden_units}.maxlen={args.maxlen}'
-                f'.dropout={args.dropout_rate}.pth'
-            )
-            save_path = os.path.join(args.dataset, fname)
-        model = train_sasrec(
+        fname_di = (
+            f'SASRec_DI.epoch={args.num_epochs}.lr={args.lr}'
+            f'.layer={args.num_blocks}.head={args.num_heads}'
+            f'.hidden={args.hidden_units}.maxlen={args.maxlen}'
+            f'.dropout={args.dropout_rate}.pth'
+        )
+        save_path_di = args.save_path_di or os.path.join(args.dataset, fname_di)
+        model_di = train_sasrec_di(
             user_train = user_train,
             usernum    = usernum,
             itemnum    = itemnum,
@@ -385,53 +363,72 @@ def main():
             num_epochs = args.num_epochs,
             batch_size = args.batch_size,
             lr         = args.lr,
-            save_path  = save_path,
+            seed       = args.seed,
+            save_path  = save_path_di,
         )
 
-    # ---- Original evaluate() ------------------------------------------ #
-    print("\n========== original evaluate() from sasrec/utils.py ==========")
-    orig = run_original_evaluate(model, dataset, args_ns, seed=args.seed)
-    print("\nResults:")
-    for k, v in orig.items():
+    # ---- Model B: sasrec/utils.WarpSampler ---------------------------- #
+    print("\n" + "=" * 60)
+    print("Model B: sasrec/utils.WarpSampler (original)")
+    print("=" * 60)
+    if args.state_dict_path_orig is not None:
+        print(f"Loading checkpoint: {args.state_dict_path_orig}")
+        model_orig = load_checkpoint(args.state_dict_path_orig, device)
+    else:
+        fname_orig = (
+            f'SASRec_ORIG.epoch={args.num_epochs}.lr={args.lr}'
+            f'.layer={args.num_blocks}.head={args.num_heads}'
+            f'.hidden={args.hidden_units}.maxlen={args.maxlen}'
+            f'.dropout={args.dropout_rate}.pth'
+        )
+        save_path_orig = args.save_path_orig or os.path.join(args.dataset, fname_orig)
+        model_orig = train_sasrec_orig(
+            user_train = user_train,
+            usernum    = usernum,
+            itemnum    = itemnum,
+            args_ns    = args_ns,
+            num_epochs = args.num_epochs,
+            batch_size = args.batch_size,
+            lr         = args.lr,
+            seed       = args.seed,
+            save_path  = save_path_orig,
+        )
+
+    # ---- Evaluate both models with sasrec/utils.evaluate() ------------ #
+    print("\n========== Evaluating Model A (data_interface.WarpSampler) ==========")
+    metrics_di = run_original_evaluate(model_di, dataset, args_ns, seed=args.seed)
+    print("Results:")
+    for k, v in metrics_di.items():
         print(f"  {k}: {v:.4f}")
 
-    # ---- eval_interface.run_evaluation() -------------------------------- #
-    print("\n========== eval_interface.run_evaluation() ==========")
-    ei = run_eval_interface(
-        model          = model,
-        dataset_name   = args.dataset,
-        data_dir       = data_dir,
-        test_dir       = test_dir,
-        maxlen         = args.maxlen,
-        seed           = args.seed,
-        max_eval_users = args.max_eval_users,
-    )
-    print("\nResults:")
-    for k, v in ei.items():
+    print("\n========== Evaluating Model B (sasrec/utils.WarpSampler) ==========")
+    metrics_orig = run_original_evaluate(model_orig, dataset, args_ns, seed=args.seed)
+    print("Results:")
+    for k, v in metrics_orig.items():
         print(f"  {k}: {v:.4f}")
 
     # ---- Side-by-side comparison --------------------------------------- #
     print("\n========== Comparison ==========")
-    print(f"{'Metric':<12} {'Original':>10} {'Interface':>10} {'Delta':>10}")
-    print("-" * 46)
+    print(f"{'Metric':<12} {'Model-A (DI)':>14} {'Model-B (Orig)':>14} {'Delta':>10}")
+    print("-" * 54)
     all_close = True
     for k in ['HR@10', 'HR@20', 'NDCG@10', 'NDCG@20']:
-        o     = orig.get(k, float('nan'))
-        e     = ei.get(k, float('nan'))
-        delta = e - o
+        a     = metrics_di.get(k,   float('nan'))
+        b     = metrics_orig.get(k, float('nan'))
+        delta = a - b
         flag  = "  *** MISMATCH ***" if abs(delta) > 0.01 else ""
         if abs(delta) > 0.01:
             all_close = False
-        print(f"{k:<12} {o:>10.4f} {e:>10.4f} {delta:>+10.4f}{flag}")
+        print(f"{k:<12} {a:>14.4f} {b:>14.4f} {delta:>+10.4f}{flag}")
 
     print()
     if all_close:
-        print("✓  eval_interface is consistent with sasrec/utils.evaluate() "
-              "(|delta| ≤ 0.01).")
-        print("✓  data_interface.WarpSampler produced valid training batches.")
+        print("PASS  Both samplers produce models with consistent metrics "
+              "(|delta| <= 0.01).")
+        print("      data_interface.WarpSampler is equivalent to the original.")
     else:
-        print("✗  Significant discrepancies — check eval_interface or "
-              "data_interface implementation.")
+        print("FAIL  Significant metric gap between the two models.")
+        print("      Check data_interface.WarpSampler for sampling differences.")
 
     return 0 if all_close else 1
 
