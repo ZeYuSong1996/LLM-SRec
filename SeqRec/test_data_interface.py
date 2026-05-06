@@ -371,15 +371,16 @@ def main():
         )
         save_path_di = args.save_path_di or os.path.join(args.dataset, fname_di)
         model_di = train_sasrec_di(
-            user_train = user_train,
-            usernum    = usernum,
-            itemnum    = itemnum,
-            args_ns    = args_ns,
-            num_epochs = args.num_epochs,
-            batch_size = args.batch_size,
-            lr         = args.lr,
-            seed       = args.seed,
-            save_path  = save_path_di,
+            dataset_name = args.dataset,
+            data_dir     = data_dir,
+            usernum      = usernum,
+            itemnum      = itemnum,
+            args_ns      = args_ns,
+            num_epochs   = args.num_epochs,
+            batch_size   = args.batch_size,
+            lr           = args.lr,
+            seed         = args.seed,
+            save_path    = save_path_di,
         )
 
     # ---- Model B: sasrec/utils.WarpSampler ---------------------------- #
