@@ -253,9 +253,9 @@ def train_sasrec_di(
 
 
 def train_sasrec_orig(
-    user_train: dict,
-    usernum: int,
-    itemnum: int,
+    dataset_name: str,
+    data_dir: str,
+    test_dir: str,
     args_ns: types.SimpleNamespace,
     num_epochs: int,
     batch_size: int,
@@ -264,6 +264,13 @@ def train_sasrec_orig(
     save_path: str | None,
 ) -> SASRec:
     """Train SASRec using sasrec/utils.WarpSampler (original)."""
+    # ---- Load dataset ------------------------------------------------- #
+    print("\nLoading dataset ...")
+    dataset = data_partition(dataset_name, args_ns,
+                             data_dir=data_dir, test_dir=test_dir)
+    user_train, _, _, usernum, itemnum, _ = dataset
+    print(f"usernum={usernum}  itemnum={itemnum}")
+
     sampler = OrigWarpSampler(
         user_train, usernum, itemnum,
         batch_size = batch_size,
@@ -348,11 +355,11 @@ def main():
     test_dir = args.test_dir or data_dir
     args_ns  = _build_args_ns(args, device)
 
-    # ---- Load dataset ------------------------------------------------- #
-    print("\nLoading dataset ...")
+    # ---- Load dataset (for evaluation) -------------------------------- #
+    print("\nLoading dataset for evaluation ...")
     dataset = data_partition(args.dataset, args_ns,
                              data_dir=data_dir, test_dir=test_dir)
-    user_train, _, _, usernum, itemnum, _ = dataset
+    _, _, _, usernum, itemnum, _ = dataset
     print(f"usernum={usernum}  itemnum={itemnum}")
 
     # ---- Model A: data_interface.WarpSampler -------------------------- #
@@ -399,15 +406,15 @@ def main():
         )
         save_path_orig = args.save_path_orig or os.path.join(args.dataset, fname_orig)
         model_orig = train_sasrec_orig(
-            user_train = user_train,
-            usernum    = usernum,
-            itemnum    = itemnum,
-            args_ns    = args_ns,
-            num_epochs = args.num_epochs,
-            batch_size = args.batch_size,
-            lr         = args.lr,
-            seed       = args.seed,
-            save_path  = save_path_orig,
+            dataset_name = args.dataset,
+            data_dir     = data_dir,
+            test_dir     = test_dir,
+            args_ns      = args_ns,
+            num_epochs   = args.num_epochs,
+            batch_size   = args.batch_size,
+            lr           = args.lr,
+            seed         = args.seed,
+            save_path    = save_path_orig,
         )
 
     # ---- Evaluate both models with sasrec/utils.evaluate() ------------ #
